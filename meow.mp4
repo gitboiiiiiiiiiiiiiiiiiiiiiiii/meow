@@ -1,0 +1,118 @@
+// dllmain.cpp : Defines the entry point for the DLL application.
+#include "pch.h"
+#include <iostream>
+#include "aimbot.h"
+
+constexpr int MAX_NUM_OF_PLAYERS = 32;
+
+class Entity
+{
+public:
+    uint32_t m_vtable; //0x0000
+    Vector3 m_head; //0x0004
+    char pad_0010[36]; //0x0010
+    Vector3 m_feet; //0x0034
+    Vector3 m_view_angle; //0x0040
+    char pad_004C[172]; //0x004C
+    int32_t m_health; //0x00F8
+    char pad_00FC[560]; //0x00FC
+    int32_t m_team_id; //0x032C
+}; //Size: 0x0330
+
+class EntityList
+{
+public:
+    char pad_0000[4]; //0x0
+    Entity* m_entity_ptr[MAX_NUM_OF_PLAYERS - 1]; //0x4
+};
+
+Entity* GetBestTarget(Entity* my_player_ptr, EntityList* entity_list_ptr, int* num_of_players)
+{
+    float delta_angle_old = FLT_MAX;
+    float delta_angle_new = 0;
+    Entity* target = nullptr;
+ 
+    for (int i = 0; i < *num_of_players - 1; ++i)
+    {
+        if (entity_list_ptr->m_entity_ptr[i]->m_team_id == my_player_ptr->m_team_id) continue;
+        else if (entity_list_ptr->m_entity_ptr[i]->m_health <= 0) continue;
+        else
+        {
+            Vector3 aim_angle = CalcAngle(my_player_ptr->m_head, entity_list_ptr->m_entity_ptr[i]->m_head);
+            delta_angle_new = GetVector3_hDistance(my_player_ptr->m_view_angle, aim_angle);
+            if (delta_angle_new < delta_angle_old)
+            {
+                delta_angle_old = delta_angle_new;
+                target = entity_list_ptr->m_entity_ptr[i];
+            }
+        }
+    }
+
+    return target;
+}
+
+void Aimbot(Entity* my_player_ptr, EntityList* entity_list_ptr, int* num_of_players)
+{
+    if (*num_of_players > 1)
+    {
+        Entity* target = GetBestTarget(my_player_ptr, entity_list_ptr, num_of_players);
+        if (target)
+            do
+            {
+                my_player_ptr->m_view_angle = CalcAngle(my_player_ptr->m_head, target->m_head);
+            } while (GetAsyncKeyState(VK_LBUTTON) >> 15 & 1);
+    }
+}
+
+DWORD WINAPI MainThread(HMODULE hModule)
+{
+    //Create debugging console
+    AllocConsole();
+    FILE* _Stream = nullptr;
+    freopen_s(&_Stream, "CONOUT$", "w", stdout);
+
+    //Body
+    while (true)
+    {
+        Entity* my_player_ptr = *reinterpret_cast<Entity * *>(0x50F4F4);
+        EntityList* entity_list_ptr = *reinterpret_cast<EntityList * *>(0x50F4F8);
+        int* num_of_players = reinterpret_cast<int*>(0x50F500);
+
+        //[LBUTTOM] Aimbot
+        if (GetAsyncKeyState(VK_LBUTTON) >> 15 & 1)
+            Aimbot(my_player_ptr, entity_list_ptr, num_of_players);
+
+        //[INSERT] Exit
+        if (GetAsyncKeyState(VK_INSERT) & 1)
+            break;
+    }
+
+    //Clean debugging console
+    if (_Stream != nullptr)
+        fclose(_Stream);
+    FreeConsole();
+    //Clean main
+    FreeLibraryAndExitThread(hModule, 0);
+    return 0;
+}
+
+BOOL APIENTRY DllMain( HMODULE hModule,
+                       DWORD  ul_reason_for_call,
+                       LPVOID lpReserved
+                     )
+{
+    switch (ul_reason_for_call)
+    {
+    case DLL_PROCESS_ATTACH:
+    {
+        HANDLE hThread = CreateThread(nullptr, 0, reinterpret_cast<LPTHREAD_START_ROUTINE>(MainThread), hModule, 0, nullptr);
+        if (hThread)
+            CloseHandle(hThread);
+    }
+    case DLL_THREAD_ATTACH:
+    case DLL_THREAD_DETACH:
+    case DLL_PROCESS_DETACH:
+        break;
+    }
+    return TRUE;
+}
